@@ -32,9 +32,9 @@ void sendToChildren(vector<int> innerConnection, int rank, vector<pair<int,int>>
     for (auto it : innerConnection) {
         MPI_Send(&rank, 1, MPI_INT, it, 0, MPI_COMM_WORLD);
         cout << "M(" << rank << "," << it << ")\n";
-        MPI_Send(&sz, 1, MPI_INT, it, 0, MPI_COMM_WORLD);
+        MPI_Send(&sz, 1, MPI_INT, it, rank, MPI_COMM_WORLD);
         cout << "M(" << rank << "," << it << ")\n";
-        MPI_Send((void*)data.data(), sz * sizeof(pair<int, int>), MPI_BYTE, it, 0, MPI_COMM_WORLD);
+        MPI_Send((void*)data.data(), sz * sizeof(pair<int, int>), MPI_BYTE, it, rank, MPI_COMM_WORLD);
         cout << "M(" << rank << "," << it << ")\n";
     }
 }
@@ -137,9 +137,9 @@ void getSystemForChild(int rank, unordered_map<int, int>& parent, int& ancestor)
     int numberOfElements;
 
     MPI_Recv(&ancestor, 1, MPI_INT, MPI_ANY_SOURCE, 0, MPI_COMM_WORLD, &status);
-    MPI_Recv(&numberOfElements, 1, MPI_INT, ancestor, 0, MPI_COMM_WORLD, &status);
+    MPI_Recv(&numberOfElements, 1, MPI_INT, ancestor, ancestor, MPI_COMM_WORLD, &status);
     elements = vector<pair<int,int>>(numberOfElements);
-    MPI_Recv((void*)elements.data(), numberOfElements * sizeof(pair<int,int>), MPI_BYTE, ancestor, 0, MPI_COMM_WORLD, &status);
+    MPI_Recv((void*)elements.data(), numberOfElements * sizeof(pair<int,int>), MPI_BYTE, ancestor, ancestor, MPI_COMM_WORLD, &status);
 
     for (auto it : elements) {
         parent[it.first] = it.second;
@@ -158,6 +158,127 @@ int numberOfChildren(int rank, unordered_map<int, int> mp) {
     }
 
     return ans;
+}
+
+void processLoad(unordered_map<int, int> parent, vector<int>& arr, int arrSize, vector<int> innerCluster) {
+    int workers = parent.size() - 3;
+    int load = arrSize / workers;
+    int firstClusterLoad = min(load * numberOfChildren(0, parent), arrSize);
+    int remained = arrSize - firstClusterLoad;
+    MPI_Status status;
+    int nrKids = numberOfChildren(0, parent);
+
+    MPI_Send(&load, 1, MPI_INT, 2, 4, MPI_COMM_WORLD);
+    cout << "M(0,2)\n";
+    MPI_Send(&remained, 1, MPI_INT, 2, 4, MPI_COMM_WORLD);
+    cout << "M(0,2)\n";
+    MPI_Send((void*)(arr.data() + firstClusterLoad), remained, MPI_INT, 2, 4, MPI_COMM_WORLD); 
+    cout << "M(0,2)\n";
+
+    {
+        for (int i = 0; i < nrKids; ++i) {
+            int toSend = i * load;
+            int space = load;
+
+            MPI_Send(&space, 1, MPI_INT, innerCluster[i], 0 + 3, MPI_COMM_WORLD);
+            cout << "M(" << 0 << "," << innerCluster[i] << ")\n";
+            MPI_Send((void*) (arr.data() + toSend), space, MPI_INT, innerCluster[i], 0 + 3, MPI_COMM_WORLD);
+            cout << "M(" << 0 << "," << innerCluster[i] << ")\n";
+        }
+
+        for (int i = 0; i < nrKids; ++i) {
+            int toSend = i * load;
+            int space = load;
+
+            MPI_Recv((void*) (arr.data() + toSend), space, MPI_INT, innerCluster[i], 0 + 3, MPI_COMM_WORLD, &status);
+        }
+    }
+
+    MPI_Recv((void*)(arr.data() + firstClusterLoad), remained, MPI_INT, 2, 4, MPI_COMM_WORLD, &status); 
+}
+
+void getAndProcess(unordered_map<int, int> mp, int rank, int from,  int arrSize, vector<int> innerCluster) {
+    int load, remained, sendRemained;
+    MPI_Status status;
+    vector<int> arr;
+    int clusterLoad;
+    int nrKids = numberOfChildren(rank, mp);
+
+    MPI_Recv(&load, 1, MPI_INT, from, 4, MPI_COMM_WORLD, &status);
+    MPI_Recv(&remained, 1, MPI_INT, from, 4, MPI_COMM_WORLD, &status);
+    arr = vector<int>(remained);
+    MPI_Recv((void*)arr.data(), remained, MPI_INT, from, 4, MPI_COMM_WORLD, &status);
+
+    clusterLoad = min(load * nrKids, remained);
+    sendRemained = remained - clusterLoad;
+
+    if (rank == 2) {
+        MPI_Send(&load, 1, MPI_INT, 1, 4, MPI_COMM_WORLD);
+        cout << "M(2,1)\n";
+        MPI_Send(&sendRemained, 1, MPI_INT, 1, 4, MPI_COMM_WORLD);
+        cout << "M(2,1)\n";
+        MPI_Send((void*)(arr.data() + clusterLoad), sendRemained, MPI_INT, 1, 4, MPI_COMM_WORLD); 
+        cout << "M(2,1)\n";
+    }
+    
+    {
+        for (int i = 0; i < nrKids; ++i) {
+            int toSend = i * load;
+            int space = load;
+
+            if (toSend >= clusterLoad) {
+                break;
+            }
+
+            if (rank == 1 && i == nrKids - 1) {
+                space = remained - toSend;
+            }
+
+            MPI_Send(&space, 1, MPI_INT, innerCluster[i], rank + 3, MPI_COMM_WORLD);
+            cout << "M(" << rank << "," << innerCluster[i] << ")\n";
+            MPI_Send((void*) (arr.data() + toSend), space, MPI_INT, innerCluster[i], rank + 3, MPI_COMM_WORLD);
+            cout << "M(" << rank << "," << innerCluster[i] << ")\n";
+        }
+
+        for (int i = 0; i < nrKids; ++i) {
+            int toSend = i * load;
+            int space = load;
+
+            if (toSend >= clusterLoad) {
+                break;
+            }
+
+            if (rank == 1 && i == nrKids - 1) {
+                space = remained - toSend;
+            }
+
+            MPI_Recv((void*) (arr.data() + toSend), space, MPI_INT, innerCluster[i], rank + 3, MPI_COMM_WORLD, &status);
+        }
+    }
+
+    if (rank == 2) {
+        MPI_Recv((void*)(arr.data() + clusterLoad), sendRemained, MPI_INT, 1, 4, MPI_COMM_WORLD, &status);
+    }
+    
+    MPI_Send((void*)arr.data(), remained, MPI_INT, from, 4, MPI_COMM_WORLD);
+    cout << "M(" << rank << "," << from << ")\n";
+}
+
+void getAndMultiply(int ancestor, int rank) {
+    int sz;
+    vector<int> arr;
+    MPI_Status status;
+
+    MPI_Recv(&sz, 1, MPI_INT, ancestor, ancestor + 3, MPI_COMM_WORLD, &status);
+    arr = vector<int>(sz);
+    MPI_Recv((void*) arr.data(), sz, MPI_INT, ancestor, ancestor + 3, MPI_COMM_WORLD, &status);
+    
+    for (int i = 0; i < sz; ++i) {
+        arr[i] = arr[i] * 2;
+    }
+
+    MPI_Send((void*) arr.data(), sz, MPI_INT, ancestor, ancestor + 3, MPI_COMM_WORLD);
+    cout << "M(" << rank << "," << ancestor << ")\n";
 }
 
 int main(int argc, char** argv) {
@@ -199,10 +320,20 @@ int main(int argc, char** argv) {
         for (int i = 0; i < arraySize; ++i) {
             arr[i] = i;
         }
-    } else if (rank < 3) {
 
+        processLoad(parent, arr, arraySize, innerCluster);
+
+        for (auto it : arr) {
+            cout << it << " ";
+        }
+
+        cout << '\n';
+    } else if (rank == 1) {
+        getAndProcess(parent, rank, 2, arraySize, innerCluster);
+    } else if (rank == 2) {
+        getAndProcess(parent, rank, 0, arraySize, innerCluster);
     } else {
-        
+        getAndMultiply(ancestor, rank);
     }
 
     MPI_Finalize();
