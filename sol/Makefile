@@ -8,5 +8,5 @@ build:
 run:
 	mpirun -oversubscribe -np $(NRPROC) tema3 $(N) $(BONUS)
 
-clear:
+clean:
 	rm tema3

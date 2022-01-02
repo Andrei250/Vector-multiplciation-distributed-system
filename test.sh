@@ -120,7 +120,7 @@ function check_bonus {
 	local count=0
 	local good=0
 
-	run_test "mpirun -np $procs ./tema3 $N 1"
+	run_test "mpirun -oversubscribe -np $procs ./tema3 $N 1"
 
 	# verificare topologie
 	procs=$(($procs-1))
@@ -206,7 +206,7 @@ do
 	procs=`sed '1q;d' inputs.txt`
 	N=`sed '2q;d' inputs.txt`
 
-	run_test "mpirun -np $procs ./tema3 $N 0"
+	run_test "mpirun -oversubscribe -np $procs ./tema3 $N 0"
 
 	# verificare topologie
 	check_topology $procs

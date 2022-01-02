@@ -1,0 +1,41 @@
+Dumitrescu Andrei 333CC
+
+Tema realizata in C++.
+Am retinut pentru fiecare "nod" parintele acestuia intr-un ordered map.
+La inceput citesc din fisier pentru fiecare coordonator.
+Duap ce fac citirea, transmit informatia de la corodonatorii 1 si 0 la
+coordoantorul 2. Fac asta pentru a trata si situatie in care nu exista
+legatura intre coordonatorii 0 si 1. Avand in vedere ca tema specifica
+ca sunt doar 3 coordonatori am folosit aceasta metoda de a face toata
+topologia in coordonatorul 2, apoi sa transmit la 0 si 1, urmand ca
+sa trimit fiecarui worker procesul parinte si topologia. Dupa fiecare
+trimitere de topologie, o alcatuiam in fiecare proces si o afisam.
+
+Am mers pe ideea de a trimite catre coordonatorul 2, deoarece tema 
+specifica ca sunt doar 3 coordonatori. Intr-un sistem real ma gandesc
+ca as fi avut o alta abordare daca ar fi fost mai mult coordonatori
+si stiam elgaturile. As fi facut un fel de lant pornind dintr-un proces
+random, urmand sa transmit nodurile copii ale fiecarui nod catre
+celalalt din lant. In fiecare faceam un recv de la nodul i - 1 si
+un send catre i + 1 cu informatiile adunate pana acum. La  nodul 
+final as fif acut topologia pe care o trimiteam inapoi catre ceilalti,
+urmand sa trimit topologia finala si workerilor. Insa pentru aceasta tema,
+am considera ca pot trimite procesului 2 informatia, sa o fac si dupa
+sa o trimit la 0 si 1.
+
+Pentru parte a doua, am facut vectorul in procesul 0, apoi am calcualt cat
+este load-ul pe fiecare worker in parte. Am pastrat atatea elemente cat
+este nevoie pentru clusterul curent ( laod * copii ) si am transmis ce
+ramane mai departe precum si load-ul pe fiecare worker pentru a calcula.
+Am folosit taguri digerite ( 4, rank + 3, 0, 1, 2), deoarece cateodata
+luam o eroare de trunchiere si am vazut ca asta ar rezolva cateva probleme.
+In coordonatorul 2 am calculat loadul necesar pentru acest cluster si
+am trimis ce ramane clusterului 1 ( considerand bonusul ). Fiecare
+coordonator trimite workerilor load-ul necesar de calculat si il primesc
+inapoi apoi toate se transmit din 1 -> 2 -> 0.
+
+La final folosesc o bariera si dupa afisez rezultatul.
+
+Am folosit bariera, deoarece am observat ca se mai afiseaza random un mesaj
+si incurca rezultatul.
+

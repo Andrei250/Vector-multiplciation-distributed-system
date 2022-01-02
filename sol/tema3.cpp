@@ -1,15 +1,17 @@
+// Dumitrescu Andrei 333CC
 #include <iostream>
 #include <fstream>
 #include "mpi.h"
-#include <unordered_map>
+#include <map>
 #include <vector>
 #include <string>
 
 using namespace std;
 
+// Read information for each coordinator
 void readChildren(string filename, int rank,
                     vector<int>& innerCluster,
-                    unordered_map<int, int>& parent) {
+                    map<int, int>& parent) {
     ifstream f(filename);
     int N;
 
@@ -26,7 +28,10 @@ void readChildren(string filename, int rank,
     f.close();
 }
 
-void sendToChildren(vector<int> innerConnection, int rank, vector<pair<int,int>> data) {
+// Send parent and topology to each child from the cluster
+void sendToChildren(vector<int> innerConnection,
+                    int rank,
+                    vector<pair<int,int>> data) {
     int sz = data.size();
 
     for (auto it : innerConnection) {
@@ -39,6 +44,7 @@ void sendToChildren(vector<int> innerConnection, int rank, vector<pair<int,int>>
     }
 }
 
+// Print topology in each process.
 void printSystem(int rank, vector<pair<int, int>> elements) {
     string ans = to_string(rank) + " -> ";
 
@@ -56,15 +62,20 @@ void printSystem(int rank, vector<pair<int, int>> elements) {
         ans.push_back(' ');
     }
 
+    ans.pop_back();
+
     cout << ans << '\n';
 }
 
-void secondClusterCoordConn(unordered_map<int, int>& parent, vector<int>& innerCone) {
+// Second cluster will get each topology from cluster 0 and 1.
+// It will build the final topology and will send it back to each coordinator
+// and to its workers.
+void secondClusterCoordConn(map<int, int>& parent, vector<int>& innerCone) {
     int numberOfElements;
     MPI_Status status;
     vector<int> elements;
 
-    // Information from the first Cluster
+    // Information from the first Cluster.
     {
         MPI_Recv(&numberOfElements, 1, MPI_INT, 0, 0, MPI_COMM_WORLD, &status);
         elements = vector<int>(numberOfElements);
@@ -75,7 +86,7 @@ void secondClusterCoordConn(unordered_map<int, int>& parent, vector<int>& innerC
         }
     }
     
-    // Information from the thirs Cluster
+    // Information from the thirs Cluster.
     {
         MPI_Recv(&numberOfElements, 1, MPI_INT, 1, 0, MPI_COMM_WORLD, &status);
         elements = vector<int>(numberOfElements);
@@ -86,6 +97,7 @@ void secondClusterCoordConn(unordered_map<int, int>& parent, vector<int>& innerC
         }
     }
 
+    // Store topology into a vector of pairs.
     vector<pair<int, int>> mapPairs;
     int sz;
 
@@ -96,20 +108,25 @@ void secondClusterCoordConn(unordered_map<int, int>& parent, vector<int>& innerC
     printSystem(2, mapPairs);
     sz = mapPairs.size();
 
-    MPI_Send(&sz, 1, MPI_INT, 0, 0, MPI_COMM_WORLD);
-    cout << "M(" << 2 << "," << 0 << ")\n";
-    MPI_Send((void*)mapPairs.data(), sz * sizeof(pair<int, int>), MPI_BYTE, 0, 0, MPI_COMM_WORLD);
-    cout << "M(" << 2 << "," << 0 << ")\n";
+    { // Send to the other coordinators.
+        MPI_Send(&sz, 1, MPI_INT, 0, 0, MPI_COMM_WORLD);
+        cout << "M(" << 2 << "," << 0 << ")\n";
+        MPI_Send((void*)mapPairs.data(), sz * sizeof(pair<int, int>), MPI_BYTE, 0, 0, MPI_COMM_WORLD);
+        cout << "M(" << 2 << "," << 0 << ")\n";
 
-    MPI_Send(&sz, 1, MPI_INT, 1, 0, MPI_COMM_WORLD);
-    cout << "M(" << 2 << "," << 1 << ")\n";
-    MPI_Send((void*)mapPairs.data(), sz * sizeof(pair<int, int>), MPI_BYTE, 1, 0, MPI_COMM_WORLD);
-    cout << "M(" << 2 << "," << 1 << ")\n";
+        MPI_Send(&sz, 1, MPI_INT, 1, 0, MPI_COMM_WORLD);
+        cout << "M(" << 2 << "," << 1 << ")\n";
+        MPI_Send((void*)mapPairs.data(), sz * sizeof(pair<int, int>), MPI_BYTE, 1, 0, MPI_COMM_WORLD);
+        cout << "M(" << 2 << "," << 1 << ")\n";
+    }
+    
 
     sendToChildren(innerCone, 2, mapPairs);
 }
 
-void clusterConn(unordered_map<int, int>& parent, vector<int> innerCluster, int rank) {
+// Send topology to cluster 2 and then receive the final topology.
+// Send topolofy to workers.
+void clusterConn(map<int, int>& parent, vector<int> innerCluster, int rank) {
     int numberOfElements = innerCluster.size();
     vector<pair<int, int>> elements;
     MPI_Status status;
@@ -131,7 +148,8 @@ void clusterConn(unordered_map<int, int>& parent, vector<int> innerCluster, int 
     sendToChildren(innerCluster, rank, elements);
 }
 
-void getSystemForChild(int rank, unordered_map<int, int>& parent, int& ancestor) {
+// Build topology for workers.
+void getSystemForChild(int rank, map<int, int>& parent, int& ancestor) {
     vector<pair<int, int>> elements;
     MPI_Status status;
     int numberOfElements;
@@ -148,7 +166,8 @@ void getSystemForChild(int rank, unordered_map<int, int>& parent, int& ancestor)
     printSystem(rank, elements);
 }
 
-int numberOfChildren(int rank, unordered_map<int, int> mp) {
+// Find number of workers for each cluster.
+int numberOfChildren(int rank, map<int, int> mp) {
     int ans = 0;
 
     for (auto it : mp) {
@@ -160,7 +179,16 @@ int numberOfChildren(int rank, unordered_map<int, int> mp) {
     return ans;
 }
 
-void processLoad(unordered_map<int, int> parent, vector<int>& arr, int arrSize, vector<int> innerCluster) {
+// Calculate load for each worker.
+// Calcualte load for cluster 0.
+// Send the rest of the work to the other clusters.
+// Calcualte load for each worker and send the part of the array
+// to them.
+// Receive the array from the workers and build the final array.
+void processLoad(map<int, int> parent,
+                vector<int>& arr,
+                int arrSize,
+                vector<int> innerCluster) {
     int workers = parent.size() - 3;
     int load = arrSize / workers;
     int firstClusterLoad = min(load * numberOfChildren(0, parent), arrSize);
@@ -175,7 +203,7 @@ void processLoad(unordered_map<int, int> parent, vector<int>& arr, int arrSize, 
     MPI_Send((void*)(arr.data() + firstClusterLoad), remained, MPI_INT, 2, 4, MPI_COMM_WORLD); 
     cout << "M(0,2)\n";
 
-    {
+    { // Calculate load for each worker and send to them.
         for (int i = 0; i < nrKids; ++i) {
             int toSend = i * load;
             int space = load;
@@ -197,7 +225,15 @@ void processLoad(unordered_map<int, int> parent, vector<int>& arr, int arrSize, 
     MPI_Recv((void*)(arr.data() + firstClusterLoad), remained, MPI_INT, 2, 4, MPI_COMM_WORLD, &status); 
 }
 
-void getAndProcess(unordered_map<int, int> mp, int rank, int from,  int arrSize, vector<int> innerCluster) {
+// Same as above, but for clsuters 1 2.
+// Cluster 2 made 1 more receive.
+// The order is 0 -> 2 -> 1, because of the alck of connection between
+// cluster 0 and cluster 1.
+void getAndProcess(map<int, int> mp,
+                    int rank,
+                    int from,
+                    int arrSize,
+                    vector<int> innerCluster) {
     int load, remained, sendRemained;
     MPI_Status status;
     vector<int> arr;
@@ -221,7 +257,9 @@ void getAndProcess(unordered_map<int, int> mp, int rank, int from,  int arrSize,
         cout << "M(2,1)\n";
     }
     
-    {
+    { // Calcualte laod for each worker and send to them.
+        // Used rank + 3 as tag, because of the big number of sends or recvs
+        // that could happen and which can block the process.
         for (int i = 0; i < nrKids; ++i) {
             int toSend = i * load;
             int space = load;
@@ -256,7 +294,7 @@ void getAndProcess(unordered_map<int, int> mp, int rank, int from,  int arrSize,
         }
     }
 
-    if (rank == 2) {
+    if (rank == 2) { // One more receive from cluster 1.
         MPI_Recv((void*)(arr.data() + clusterLoad), sendRemained, MPI_INT, 1, 4, MPI_COMM_WORLD, &status);
     }
     
@@ -264,6 +302,7 @@ void getAndProcess(unordered_map<int, int> mp, int rank, int from,  int arrSize,
     cout << "M(" << rank << "," << from << ")\n";
 }
 
+// Process array for each worker.
 void getAndMultiply(int ancestor, int rank) {
     int sz;
     vector<int> arr;
@@ -289,7 +328,7 @@ int main(int argc, char** argv) {
 
     int procs, rank;
     vector<int> innerCluster;
-    unordered_map<int, int> parent;
+    map<int, int> parent;
     string filename;
     bool isConnected = atoi(argv[2]) == 1 ? true : false;
     int ancestor = -1;
@@ -308,6 +347,7 @@ int main(int argc, char** argv) {
 
     parent[0] = parent[1] = parent[2] = -1;
 
+    // Build topology.
     if (rank == 2) {
         secondClusterCoordConn(parent, innerCluster);
     } else if (rank < 3) {
@@ -316,16 +356,13 @@ int main(int argc, char** argv) {
         getSystemForChild(rank, parent, ancestor);
     }
 
+    // Build answer.
     if (rank == 0) {
         for (int i = 0; i < arraySize; ++i) {
             arr[i] = i;
         }
 
         processLoad(parent, arr, arraySize, innerCluster);
-
-        for (auto it : arr) {
-            cout << it << " ";
-        }
 
         cout << '\n';
     } else if (rank == 1) {
@@ -334,6 +371,16 @@ int main(int argc, char** argv) {
         getAndProcess(parent, rank, 0, arraySize, innerCluster);
     } else {
         getAndMultiply(ancestor, rank);
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    if (rank == 0) {
+        cout << "Rezultat: ";
+
+        for (auto it : arr) {
+            cout << it << " ";
+        }
     }
 
     MPI_Finalize();
